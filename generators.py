@@ -1,10 +1,4 @@
-# generators.py
-#
-# Turns a detected CAD object type + parameter dictionary into
-# paste-ready FreeCAD Python code.
-#
-# This file does NOT import FreeCAD directly.
-# It only generates FreeCAD code as a string.
+
 
 SUPPORTED_TYPES = [
     "rectangle",
@@ -619,21 +613,80 @@ shape = safe_fuse(spring, hook1)
 shape = safe_fuse(shape, hook2)
 '''
 
-
 def generate_bevel_gear(params: dict) -> str:
     v = merge_params("bevel_gear", params)
+
     return f'''
-shape = Part.makeCone({v["bottom_radius"]}, {v["top_radius"]}, {v["height"]})
-bore = Part.makeCylinder(
-    {v["bore_diameter"]} / 2.0,
-    {v["height"]} + 2,
-    FreeCAD.Vector(0, 0, -1),
-    FreeCAD.Vector(0, 0, 1),
+def create_bevel_gear(teeth, bottom_radius, top_radius, height, bore_diameter, tooth_height):
+    gear = Part.makeCone(bottom_radius, top_radius, height)
+
+    if bottom_radius <= 0:
+        return gear
+
+    tooth_span = 0.56
+    tooth_top_span = 0.26
+
+    for i in range(teeth):
+        base_angle = 2.0 * math.pi * i / teeth
+
+        a0 = base_angle - (math.pi / teeth) * tooth_span
+        a1 = base_angle - (math.pi / teeth) * tooth_top_span
+        a2 = base_angle + (math.pi / teeth) * tooth_top_span
+        a3 = base_angle + (math.pi / teeth) * tooth_span
+
+        bottom_outer = bottom_radius + tooth_height
+        top_outer = top_radius + tooth_height * (top_radius / bottom_radius)
+
+        bottom_points = [
+            FreeCAD.Vector(bottom_radius * math.cos(a0), bottom_radius * math.sin(a0), 0),
+            FreeCAD.Vector(bottom_outer * math.cos(a1), bottom_outer * math.sin(a1), 0),
+            FreeCAD.Vector(bottom_outer * math.cos(a2), bottom_outer * math.sin(a2), 0),
+            FreeCAD.Vector(bottom_radius * math.cos(a3), bottom_radius * math.sin(a3), 0),
+        ]
+
+        top_points = [
+            FreeCAD.Vector(top_radius * math.cos(a0), top_radius * math.sin(a0), height),
+            FreeCAD.Vector(top_outer * math.cos(a1), top_outer * math.sin(a1), height),
+            FreeCAD.Vector(top_outer * math.cos(a2), top_outer * math.sin(a2), height),
+            FreeCAD.Vector(top_radius * math.cos(a3), top_radius * math.sin(a3), height),
+        ]
+
+        try:
+            faces = [
+                Part.Face(Part.makePolygon(bottom_points + [bottom_points[0]])),
+                Part.Face(Part.makePolygon(top_points + [top_points[0]])),
+                Part.Face(Part.makePolygon([bottom_points[0], bottom_points[1], top_points[1], top_points[0], bottom_points[0]])),
+                Part.Face(Part.makePolygon([bottom_points[1], bottom_points[2], top_points[2], top_points[1], bottom_points[1]])),
+                Part.Face(Part.makePolygon([bottom_points[2], bottom_points[3], top_points[3], top_points[2], bottom_points[2]])),
+                Part.Face(Part.makePolygon([bottom_points[3], bottom_points[0], top_points[0], top_points[3], bottom_points[3]])),
+            ]
+
+            shell = Part.makeShell(faces)
+            tooth = Part.makeSolid(shell)
+            gear = safe_fuse(gear, tooth)
+
+        except Exception:
+            pass
+
+    bore = Part.makeCylinder(
+        bore_diameter / 2.0,
+        height + 2,
+        FreeCAD.Vector(0, 0, -1),
+        FreeCAD.Vector(0, 0, 1),
+    )
+
+    return safe_cut(gear, bore)
+
+
+shape = create_bevel_gear(
+    int({v["teeth"]}),
+    {v["bottom_radius"]},
+    {v["top_radius"]},
+    {v["height"]},
+    {v["bore_diameter"]},
+    {v["tooth_height"]},
 )
-shape = safe_cut(shape, bore)
 '''
-
-
 def generate_helical_gear(params: dict) -> str:
     v = merge_params("helical_gear", params)
     return f'''
